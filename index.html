@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Nexus Markets</title>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://unpkg.com/recharts@2.10.0/umd/Recharts.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&display=swap" rel="stylesheet"/>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+html,body,#root{width:100%;height:100%;overflow:hidden;background:#06060f;}
+::-webkit-scrollbar{width:3px;}
+::-webkit-scrollbar-track{background:transparent;}
+::-webkit-scrollbar-thumb{background:#1a1a35;border-radius:2px;}
+@keyframes ticker{0%{transform:translateX(0)}100%{transform:translateX(-50%)}}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.3}}
+input::placeholder{color:#1e1e3a;}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const {useState,useEffect,useRef}=React;
+const {AreaChart,Area,YAxis,Tooltip,ResponsiveContainer}=Recharts;
+
+const ASSETS={
+stocks:[
+{symbol:“AAPL”,name:“Apple Inc.”,price:189.43,change:2.31,changePct:1.24},
+{symbol:“NVDA”,name:“NVIDIA Corp.”,price:875.20,change:-12.40,changePct:-1.40},
+{symbol:“TSLA”,name:“Tesla Inc.”,price:248.87,change:5.67,changePct:2.33},
+{symbol:“MSFT”,name:“Microsoft”,price:415.10,change:3.20,changePct:0.78},
+{symbol:“AMZN”,name:“Amazon”,price:182.95,change:-1.05,changePct:-0.57},
+],
+crypto:[
+{symbol:“BTC”,name:“Bitcoin”,price:67340.00,change:1240.00,changePct:1.88},
+{symbol:“ETH”,name:“Ethereum”,price:3520.50,change:-88.20,changePct:-2.44},
+{symbol:“SOL”,name:“Solana”,price:182.30,change:7.80,changePct:4.47},
+{symbol:“BNB”,name:“BNB”,price:578.40,change:12.10,changePct:2.14},
+{symbol:“XRP”,name:“Ripple”,price:0.5821,change:-0.0120,changePct:-2.02},
+],
+forex:[
+{symbol:“EUR/USD”,name:“Euro / Dollar”,price:1.0842,change:0.0023,changePct:0.21},
+{symbol:“GBP/USD”,name:“Pound / Dollar”,price:1.2674,change:-0.0041,changePct:-0.32},
+{symbol:“USD/JPY”,name:“Dollar / Yen”,price:153.72,change:0.48,changePct:0.31},
+{symbol:“AUD/USD”,name:“Aussie / Dollar”,price:0.6531,change:0.0018,changePct:0.28},
+{symbol:“USD/CHF”,name:“Dollar / Franc”,price:0.9021,change:-0.0009,changePct:-0.10},
+],
+commodities:[
+{symbol:“WTI”,name:“WTI Crude Oil”,price:78.42,change:1.23,changePct:1.59},
+{symbol:“GOLD”,name:“Gold Spot”,price:2345.80,change:-8.40,changePct:-0.36},
+{symbol:“NGAS”,name:“Natural Gas”,price:2.184,change:0.042,changePct:1.96},
+],
+};
+
+const NEWS=[
+{id:1,time:“2m”,headline:“Fed signals rate cut as inflation cools to 2.8%”,sentiment:“bullish”,asset:“Macro”},
+{id:2,time:“8m”,headline:“NVIDIA beats earnings, guides higher on AI demand”,sentiment:“bullish”,asset:“NVDA”},
+{id:3,time:“15m”,headline:“Bitcoin ETF sees record $840M inflows in single session”,sentiment:“bullish”,asset:“BTC”},
+{id:4,time:“22m”,headline:“UK GDP misses forecast, sterling weakens vs majors”,sentiment:“bearish”,asset:“GBP/USD”},
+{id:5,time:“31m”,headline:“WTI surges as OPEC+ confirms extended production cuts”,sentiment:“bullish”,asset:“WTI”},
+{id:6,time:“45m”,headline:“ECB holds rates steady, EUR volatility spikes”,sentiment:“neutral”,asset:“EUR/USD”},
+{id:7,time:“1h”,headline:“Gold retreats from record highs as dollar strengthens”,sentiment:“bearish”,asset:“GOLD”},
+{id:8,time:“2h”,headline:“Solana upgrade completes, SOL surges 4.5% on volume”,sentiment:“bullish”,asset:“SOL”},
+];
+
+const PORTFOLIO=[
+{symbol:“AAPL”,qty:25,avgCost:172.10,current:189.43},
+{symbol:“BTC”,qty:0.42,avgCost:58200,current:67340},
+{symbol:“EUR/USD”,qty:10000,avgCost:1.0780,current:1.0842},
+{symbol:“NVDA”,qty:8,avgCost:820.00,current:875.20},
+{symbol:“WTI”,qty:100,avgCost:74.20,current:78.42},
+{symbol:“GOLD”,qty:2,avgCost:2200.00,current:2345.80},
+];
+
+const TIMEFRAMES=[“1m”,“5m”,“15m”,“1h”,“4h”,“1D”,“1W”];
+
+const fmt=(n)=>{
+if(n>=10000)return n.toLocaleString(“en-US”,{minimumFractionDigits:2,maximumFractionDigits:2});
+if(n>=100)return n.toFixed(2);
+if(n>=1)return n.toFixed(4);
+return n.toFixed(6);
+};
+const fmtUSD=(n)=>`$${Math.abs(n)>=1000?Math.abs(n).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2}):Math.abs(n).toFixed(2)}`;
+const fmtPct=(n)=>`${n>=0?"+":""}${n.toFixed(2)}%`;
+
+function genCandles(basePrice,count=100,tf=“1D”){
+const candles=[],now=Date.now();
+const tfMs={“1m”:60e3,“5m”:3e5,“15m”:9e5,“1h”:36e5,“4h”:144e5,“1D”:864e5,“1W”:6048e5};
+const ms=tfMs[tf]||864e5;
+let price=basePrice*0.75;
+for(let i=count;i>=0;i–){
+const vol=price*0.018;
+const open=price;
+const close=+(price+(Math.random()-0.47)*vol).toFixed(6);
+const high=+(Math.max(open,close)+Math.random()*vol*0.6).toFixed(6);
+const low=+(Math.min(open,close)-Math.random()*vol*0.6).toFixed(6);
+candles.push({time:Math.floor((now-i*ms)/1000),open:+open.toFixed(6),high,low,close,volume:Math.floor(Math.random()*5e6+1e5)});
+price=close;
+}
+return candles;
+}
+
+function genOrderBook(price){
+const asks=[],bids=[];
+let ap=price*1.00015,bp=price*0.99985;
+for(let i=0;i<10;i++){
+const as=+(Math.random()*30+0.5).toFixed(4);
+const bs=+(Math.random()*30+0.5).toFixed(4);
+asks.push({price:+ap.toFixed(6),size:as,total:+(as*ap).toFixed(2)});
+bids.push({price:+bp.toFixed(6),size:bs,total:+(bs*bp).toFixed(2)});
+ap*=1.00025;bp*=0.99975;
+}
+return{asks:asks.reverse(),bids};
+}
+
+function CandleChart({candles,livePrice,symbol}){
+const canvasRef=useRef(null);
+const UP=”#00e5a0”,DN=”#ff4d6d”,BG=”#06060f”,GRID=”#0d0d1c”,TEXT=”#444470”;
+useEffect(()=>{
+const canvas=canvasRef.current;
+if(!canvas||!candles.length)return;
+canvas.width=canvas.offsetWidth;
+canvas.height=canvas.offsetHeight;
+const ctx=canvas.getContext(“2d”);
+const W=canvas.width,H=canvas.height;
+const PAD={top:20,right:80,bottom:40,left:10};
+const chartW=W-PAD.left-PAD.right,chartH=H-PAD.top-PAD.bottom;
+const visible=candles.slice(-80);
+const prices=visible.flatMap(c=>[c.high,c.low]);
+const minP=Math.min(…prices)*0.9995,maxP=Math.max(…prices)*1.0005;
+const priceRange=maxP-minP;
+const toY=p=>PAD.top+chartH*(1-(p-minP)/priceRange);
+const barW=Math.max(2,chartW/visible.length-1);
+const toX=i=>PAD.left+i*(chartW/visible.length)+barW/2;
+ctx.fillStyle=BG;ctx.fillRect(0,0,W,H);
+ctx.strokeStyle=GRID;ctx.lineWidth=1;
+for(let i=0;i<=5;i++){
+const y=PAD.top+chartH*(i/5);
+ctx.beginPath();ctx.moveTo(PAD.left,y);ctx.lineTo(W-PAD.right,y);ctx.stroke();
+const price=maxP-(priceRange*(i/5));
+ctx.fillStyle=TEXT;ctx.font=“10px ‘Space Mono’,monospace”;ctx.textAlign=“left”;
+ctx.fillText(fmt(price),W-PAD.right+6,y+4);
+}
+const step=Math.ceil(visible.length/8);
+for(let i=0;i<visible.length;i+=step){
+const x=toX(i);
+ctx.beginPath();ctx.strokeStyle=GRID;ctx.moveTo(x,PAD.top);ctx.lineTo(x,PAD.top+chartH);ctx.stroke();
+const d=new Date(visible[i].time*1000);
+ctx.fillStyle=TEXT;ctx.textAlign=“center”;ctx.font=“9px ‘Space Mono’,monospace”;
+ctx.fillText(d.toLocaleDateString([],{month:“short”,day:“numeric”}),x,PAD.top+chartH+16);
+}
+visible.forEach((c,i)=>{
+const x=toX(i);const isUp=c.close>=c.open;const color=isUp?UP:DN;
+ctx.strokeStyle=color;ctx.fillStyle=color;ctx.lineWidth=1;
+ctx.beginPath();ctx.moveTo(x,toY(c.high));ctx.lineTo(x,toY(c.low));ctx.stroke();
+const bodyTop=toY(Math.max(c.open,c.close));
+const bodyBot=toY(Math.min(c.open,c.close));
+const bodyH=Math.max(1,bodyBot-bodyTop);
+if(isUp){ctx.strokeRect(x-barW/2,bodyTop,barW,bodyH);}
+else{ctx.fillRect(x-barW/2,bodyTop,barW,bodyH);}
+});
+if(livePrice){
+const y=toY(livePrice);
+ctx.strokeStyle=UP;ctx.lineWidth=1;ctx.setLineDash([4,4]);
+ctx.beginPath();ctx.moveTo(PAD.left,y);ctx.lineTo(W-PAD.right,y);ctx.stroke();
+ctx.setLineDash([]);
+ctx.fillStyle=UP;ctx.fillRect(W-PAD.right,y-10,PAD.right,20);
+ctx.fillStyle=”#000”;ctx.font=“bold 10px ‘Space Mono’,monospace”;ctx.textAlign=“center”;
+ctx.fillText(fmt(livePrice),W-PAD.right+40,y+4);
+}
+ctx.fillStyle=”#0d0d20”;ctx.font=“bold 40px ‘Space Mono’,monospace”;ctx.textAlign=“center”;
+ctx.fillText(symbol,W/2,H/2+15);
+},[candles,livePrice,symbol]);
+return <canvas ref={canvasRef} style={{display:“block”,width:“100%”,height:“100%”}}/>;
+}
+
+function VolumeBar({candles}){
+const visible=candles.slice(-80);
+const maxVol=Math.max(…visible.map(c=>c.volume));
+return(
+<div style={{display:“flex”,alignItems:“flex-end”,gap:1,height:“100%”,padding:“0 10px 2px 10px”}}>
+{visible.map((c,i)=>(
+<div key={i} style={{flex:1,background:c.close>=c.open?”#00e5a030”:”#ff4d6d30”,height:`${(c.volume/maxVol)*100}%`,minWidth:1,borderRadius:“1px 1px 0 0”}}/>
+))}
+</div>
+);
+}
+
+function OrderBook({asset}){
+const ob=genOrderBook(asset.price);
+const maxT=Math.max(…ob.asks.map(a=>a.total),…ob.bids.map(b=>b.total));
+const row=(r,side)=>(
+<div key={r.price} style={{display:“grid”,gridTemplateColumns:“1fr 1fr 1fr”,padding:“2px 10px”,position:“relative”,alignItems:“center”,fontSize:10}}>
+<div style={{position:“absolute”,right:0,top:0,bottom:0,width:`${(r.total/maxT)*100}%`,background:side===“ask”?”#ff4d6d0d”:”#00e5a00d”}}/>
+<span style={{color:side===“ask”?”#ff4d6d”:”#00e5a0”,fontFamily:”‘Space Mono’,monospace”,zIndex:1}}>{fmt(r.price)}</span>
+<span style={{textAlign:“center”,color:”#6060a0”,fontFamily:”‘Space Mono’,monospace”,zIndex:1}}>{r.size.toFixed(3)}</span>
+<span style={{textAlign:“right”,color:”#333360”,fontFamily:”‘Space Mono’,monospace”,zIndex:1}}>{fmtUSD(r.total)}</span>
+</div>
+);
+return(
+<div style={{display:“flex”,flexDirection:“column”,height:“100%”}}>
+<div style={{display:“grid”,gridTemplateColumns:“1fr 1fr 1fr”,padding:“4px 10px 6px”,fontSize:9,color:”#222245”,fontFamily:”‘Space Mono’,monospace”,letterSpacing:0.5}}>
+<span>PRICE</span><span style={{textAlign:“center”}}>SIZE</span><span style={{textAlign:“right”}}>TOTAL</span>
+</div>
+<div style={{flex:1,overflowY:“auto”}}>
+{ob.asks.map(r=>row(r,“ask”))}
+<div style={{textAlign:“center”,padding:“6px 10px”,background:”#0a0a18”,color:asset.changePct>=0?”#00e5a0”:”#ff4d6d”,fontWeight:700,fontSize:13,fontFamily:”‘Space Mono’,monospace”,letterSpacing:1}}>
+{fmt(asset.price)} <span style={{fontSize:9,opacity:0.6}}>{fmtPct(asset.changePct)}</span>
+</div>
+{ob.bids.map(r=>row(r,“bid”))}
+</div>
+</div>
+);
+}
+
+function TradePanel({asset}){
+const [side,setSide]=useState(“buy”);
+const [type,setType]=useState(“market”);
+const [qty,setQty]=useState(””);
+const [lp,setLp]=useState(fmt(asset.price));
+const [orders,setOrders]=useState([
+{id:1,symbol:“AAPL”,side:“buy”,type:“limit”,qty:10,price:185.00,status:“open”},
+{id:2,symbol:“BTC”,side:“sell”,type:“limit”,qty:0.1,price:70000,status:“open”},
+]);
+const ep=type===“limit”?parseFloat(lp):asset.price;
+const total=qty?(parseFloat(qty)*ep).toFixed(2):”—”;
+const submit=()=>{
+if(!qty)return;
+setOrders(p=>[{id:Date.now(),symbol:asset.symbol,side,type,qty:parseFloat(qty),price:ep,status:“filled”},…p]);
+setQty(””);
+};
+return(
+<div style={{display:“flex”,flexDirection:“column”,height:“100%”}}>
+<div style={{display:“grid”,gridTemplateColumns:“1fr 1fr”,margin:“10px 10px 0”}}>
+{[“buy”,“sell”].map(s=>(
+<button key={s} onClick={()=>setSide(s)} style={{padding:“8px 0”,border:“none”,cursor:“pointer”,fontFamily:”‘Space Mono’,monospace”,fontWeight:700,letterSpacing:1,fontSize:10,background:side===s?(s===“buy”?”#00e5a0”:”#ff4d6d”):”#111120”,color:side===s?”#000”:”#333360”,borderRadius:s===“buy”?“5px 0 0 5px”:“0 5px 5px 0”}}>
+{s.toUpperCase()}
+</button>
+))}
+</div>
+<div style={{padding:“10px 10px 0”,display:“flex”,flexDirection:“column”,gap:8}}>
+<div style={{display:“flex”,gap:4}}>
+{[“market”,“limit”,“stop”].map(t=>(
+<button key={t} onClick={()=>setType(t)} style={{flex:1,padding:“4px 0”,border:`1px solid ${type===t?"#2a2a50":"#111120"}`,background:type===t?”#1a1a35”:“transparent”,color:type===t?”#c0c0f0”:”#333360”,borderRadius:4,cursor:“pointer”,fontSize:9,fontFamily:”‘Space Mono’,monospace”}}>
+{t.toUpperCase()}
+</button>
+))}
+</div>
+{type!==“market”&&(
+<div>
+<div style={{fontSize:9,color:”#333360”,fontFamily:”‘Space Mono’,monospace”,marginBottom:3}}>LIMIT PRICE</div>
+<input value={lp} onChange={e=>setLp(e.target.value)} style={{width:“100%”,background:”#0a0a18”,border:“1px solid #1a1a35”,borderRadius:5,padding:“7px 9px”,color:”#c0c0f0”,fontFamily:”‘Space Mono’,monospace”,fontSize:11,boxSizing:“border-box”,outline:“none”}}/>
+</div>
+)}
+<div>
+<div style={{fontSize:9,color:”#333360”,fontFamily:”‘Space Mono’,monospace”,marginBottom:3}}>QUANTITY</div>
+<input value={qty} onChange={e=>setQty(e.target.value)} placeholder=“0.00” style={{width:“100%”,background:”#0a0a18”,border:“1px solid #1a1a35”,borderRadius:5,padding:“7px 9px”,color:”#c0c0f0”,fontFamily:”‘Space Mono’,monospace”,fontSize:11,boxSizing:“border-box”,outline:“none”}}/>
+</div>
+<div style={{display:“flex”,justifyContent:“space-between”,fontSize:10,color:”#333360”,fontFamily:”‘Space Mono’,monospace”}}>
+<span>EST. TOTAL</span><span style={{color:”#6060a0”}}>${total}</span>
+</div>
+<button onClick={submit} style={{padding:“10px 0”,background:side===“buy”?”#00e5a018”:”#ff4d6d18”,border:`1px solid ${side==="buy"?"#00e5a0":"#ff4d6d"}`,color:side===“buy”?”#00e5a0”:”#ff4d6d”,borderRadius:5,cursor:“pointer”,fontFamily:”‘Space Mono’,monospace”,fontWeight:700,fontSize:10,letterSpacing:1}}>
+PLACE {side.toUpperCase()} ORDER
+</button>
+</div>
+<div style={{flex:1,overflowY:“auto”,marginTop:8}}>
+<div style={{padding:“6px 10px”,fontSize:9,color:”#222245”,fontFamily:”‘Space Mono’,monospace”,borderTop:“1px solid #111120”,letterSpacing:1}}>ORDERS</div>
+{orders.slice(0,8).map(o=>(
+<div key={o.id} style={{padding:“7px 10px”,borderBottom:“1px solid #0d0d1a”,display:“flex”,justifyContent:“space-between”,alignItems:“center”}}>
+<div>
+<div style={{fontSize:10,fontWeight:700,color:o.side===“buy”?”#00e5a0”:”#ff4d6d”,fontFamily:”‘Space Mono’,monospace”}}>{o.side.toUpperCase()} {o.symbol}</div>
+<div style={{fontSize:9,color:”#333360”}}>{o.qty} @ {fmt(o.price)}</div>
+</div>
+<div style={{fontSize:9,padding:“2px 7px”,borderRadius:3,background:o.status===“open”?”#0a2a1a”:”#1a1a35”,color:o.status===“open”?”#00e5a0”:”#5050a0”,fontFamily:”‘Space Mono’,monospace”}}>{o.status}</div>
+</div>
+))}
+</div>
+</div>
+);
+}
+
+function Portfolio(){
+const tv=PORTFOLIO.reduce((s,p)=>s+p.qty*p.current,0);
+const tc=PORTFOLIO.reduce((s,p)=>s+p.qty*p.avgCost,0);
+const pnl=tv-tc,pct=(pnl/tc)*100;
+const hist=Array.from({length:30},(_,i)=>({d:i,v:tv*(0.82+0.18*(i/29)+(Math.random()-0.4)*0.025)}));
+return(
+<div style={{height:“100%”,overflowY:“auto”,padding:14}}>
+<div style={{display:“grid”,gridTemplateColumns:“1fr 1fr 1fr”,gap:10,marginBottom:14}}>
+{[{l:“PORTFOLIO VALUE”,v:fmtUSD(tv),c:”#c0c0f0”},{l:“TOTAL P&L”,v:`${pnl>=0?"+":""}${fmtUSD(pnl)}`,c:pnl>=0?”#00e5a0”:”#ff4d6d”},{l:“RETURN”,v:fmtPct(pct),c:pct>=0?”#00e5a0”:”#ff4d6d”}].map(x=>(
+<div key={x.l} style={{background:”#0d0d1f”,border:“1px solid #1a1a35”,borderRadius:7,padding:“11px 13px”}}>
+<div style={{fontSize:8,color:”#333360”,fontFamily:”‘Space Mono’,monospace”,letterSpacing:1,marginBottom:5}}>{x.l}</div>
+<div style={{fontSize:15,fontWeight:700,color:x.c,fontFamily:”‘Space Mono’,monospace”}}>{x.v}</div>
+</div>
+))}
+</div>
+<div style={{background:”#0d0d1f”,border:“1px solid #1a1a35”,borderRadius:7,padding:12,marginBottom:14,height:120}}>
+<div style={{fontSize:8,color:”#333360”,fontFamily:”‘Space Mono’,monospace”,letterSpacing:1,marginBottom:4}}>30D PERFORMANCE</div>
+<div style={{height:85}}>
+<ResponsiveContainer>
+<AreaChart data={hist}>
+<defs><linearGradient id="pg" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#00e5a0" stopOpacity={0.15}/><stop offset="95%" stopColor="#00e5a0" stopOpacity={0}/></linearGradient></defs>
+<YAxis domain={[“auto”,“auto”]} hide/>
+<Tooltip formatter={v=>fmtUSD(v)} contentStyle={{background:”#0d0d1f”,border:“1px solid #00e5a040”,fontSize:9,fontFamily:”‘Space Mono’,monospace”}}/>
+<Area type="monotone" dataKey="v" stroke="#00e5a0" strokeWidth={1.5} fill="url(#pg)" dot={false}/>
+</AreaChart>
+</ResponsiveContainer>
+</div>
+</div>
+<div style={{background:”#0d0d1f”,border:“1px solid #1a1a35”,borderRadius:7,overflow:“hidden”}}>
+<div style={{padding:“9px 13px”,borderBottom:“1px solid #111120”,display:“grid”,gridTemplateColumns:“1.5fr 1fr 1fr 1fr 1fr”,fontSize:8,color:”#333360”,fontFamily:”‘Space Mono’,monospace”,letterSpacing:1}}>
+<span>ASSET</span><span style={{textAlign:“right”}}>QTY</span><span style={{textAlign:“right”}}>AVG</span><span style={{textAlign:“right”}}>PRICE</span><span style={{textAlign:“right”}}>P&L</span>
+</div>
+{PORTFOLIO.map(p=>{
+const pl=(p.current-p.avgCost)*p.qty,pc=((p.current-p.avgCost)/p.avgCost)*100;
+return(
+<div key={p.symbol} style={{padding:“9px 13px”,borderBottom:“1px solid #0d0d1a”,display:“grid”,gridTemplateColumns:“1.5fr 1fr 1fr 1fr 1fr”,alignItems:“center”}}>
+<span style={{fontFamily:”‘Space Mono’,monospace”,fontWeight:700,color:”#c0c0f0”,fontSize:11}}>{p.symbol}</span>
+<span style={{textAlign:“right”,fontFamily:”‘Space Mono’,monospace”,fontSize:9,color:”#5050a0”}}>{p.qty}</span>
+<span style={{textAlign:“right”,fontFamily:”‘Space Mono’,monospace”,fontSize:9,color:”#5050a0”}}>{fmt(p.avgCost)}</span>
+<span style={{textAlign:“right”,fontFamily:”‘Space Mono’,monospace”,fontSize:9,color:”#c0c0f0”}}>{fmt(p.current)}</span>
+<div style={{textAlign:“right”}}>
+<div style={{fontSize:10,fontFamily:”‘Space Mono’,monospace”,color:pl>=0?”#00e5a0”:”#ff4d6d”}}>{pl>=0?”+”:””}{fmtUSD(pl)}</div>
+<div style={{fontSize:8,color:pc>=0?”#007050”:”#993040”}}>{fmtPct(pc)}</div>
+</div>
+</div>
+);
+})}
+</div>
+</div>
+);
+}
+
+function NewsFeed(){
+return(
+<div style={{height:“100%”,overflowY:“auto”}}>
+{NEWS.map(n=>(
+<div key={n.id} style={{padding:“12px 14px”,borderBottom:“1px solid #0d0d1a”,cursor:“pointer”}}>
+<div style={{display:“flex”,alignItems:“center”,gap:7,marginBottom:5}}>
+<span style={{fontSize:8,padding:“2px 6px”,borderRadius:3,fontFamily:”‘Space Mono’,monospace”,background:n.sentiment===“bullish”?”#00e5a015”:n.sentiment===“bearish”?”#ff4d6d15”:”#ffffff08”,color:n.sentiment===“bullish”?”#00e5a0”:n.sentiment===“bearish”?”#ff4d6d”:”#5050a0”}}>
+{n.sentiment.toUpperCase()}
+</span>
+<span style={{fontSize:9,color:”#333360”,fontFamily:”‘Space Mono’,monospace”}}>{n.asset}</span>
+<span style={{fontSize:9,color:”#1e1e38”,marginLeft:“auto”,fontFamily:”‘Space Mono’,monospace”}}>{n.time} ago</span>
+</div>
+<div style={{fontSize:11,color:”#8080b8”,lineHeight:1.5}}>{n.headline}</div>
+</div>
+))}
+</div>
+);
+}
+
+function App(){
+const [cat,setCat]=useState(“stocks”);
+const [asset,setAsset]=useState({…ASSETS.stocks[0],category:“stocks”});
+const [tf,setTf]=useState(“1D”);
+const [panel,setPanel]=useState(“chart”);
+const [rightTab,setRightTab]=useState(“book”);
+const [candles,setCandles]=useState(()=>genCandles(ASSETS.stocks[0].price,100,“1D”));
+const [livePrice,setLivePrice]=useState(ASSETS.stocks[0].price);
+
+useEffect(()=>{
+setCandles(genCandles(asset.price,100,tf));
+setLivePrice(asset.price);
+},[asset.symbol,tf]);
+
+useEffect(()=>{
+const iv=setInterval(()=>{
+setLivePrice(p=>+(p+(Math.random()-0.499)*p*0.0006).toFixed(6));
+},1200);
+return()=>clearInterval(iv);
+},[asset.symbol]);
+
+const isUp=asset.changePct>=0;
+const all=[…ASSETS.stocks,…ASSETS.crypto,…ASSETS.forex,…ASSETS.commodities];
+
+return(
+<div style={{height:“100vh”,background:”#06060f”,display:“flex”,flexDirection:“column”,fontFamily:“sans-serif”,overflow:“hidden”}}>
+{/* Ticker */}
+<div style={{background:”#080812”,borderBottom:“1px solid #111130”,overflow:“hidden”,height:28,display:“flex”,alignItems:“center”,flexShrink:0}}>
+<div style={{display:“flex”,animation:“ticker 60s linear infinite”,whiteSpace:“nowrap”}}>
+{[…all,…all].map((a,i)=>(
+<span key={i} style={{padding:“0 18px”,fontSize:10,color:a.changePct>=0?”#00e5a0”:”#ff4d6d”,fontFamily:”‘Space Mono’,monospace”,letterSpacing:0.8}}>
+{a.symbol} <span style={{color:”#b0b0d0”}}>{fmt(a.price)}</span> {fmtPct(a.changePct)}
+</span>
+))}
+</div>
+</div>
+
+```
+  {/* Header */}
+  <div style={{background:"#08081a",borderBottom:"1px solid #111130",padding:"0 14px",height:46,display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0}}>
+    <div style={{display:"flex",alignItems:"center",gap:9}}>
+      <div style={{width:24,height:24,background:"linear-gradient(135deg,#00e5a0,#0060ff)",borderRadius:5,display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:900,color:"#000"}}>⬡</div>
+      <span style={{fontFamily:"'Space Mono',monospace",fontWeight:700,fontSize:14,color:"#e0e0ff",letterSpacing:2}}>NEXUS</span>
+      <span style={{fontFamily:"'Space Mono',monospace",fontSize:8,color:"#1e1e38",letterSpacing:3}}>MARKETS</span>
+    </div>
+    <div style={{display:"flex",gap:5}}>
+      {["chart","portfolio","news"].map(p=>(
+        <button key={p} onClick={()=>setPanel(p)} style={{padding:"4px 12px",background:panel===p?"#1a1a35":"transparent",border:`1px solid ${panel===p?"#2a2a55":"transparent"}`,borderRadius:5,color:panel===p?"#c0c0f0":"#333360",fontFamily:"'Space Mono',monospace",fontSize:9,cursor:"pointer",letterSpacing:1,textTransform:"uppercase"}}>
+          {p}
+        </button>
+      ))}
+    </div>
+    <div style={{display:"flex",alignItems:"center",gap:5}}>
+      <div style={{width:5,height:5,borderRadius:"50%",background:"#00e5a0",animation:"pulse 2s infinite"}}/>
+      <span style={{fontFamily:"'Space Mono',monospace",fontSize:9,color:"#00e5a0"}}>LIVE</span>
+    </div>
+  </div>
+
+  <div style={{flex:1,display:"flex",minHeight:0}}>
+    {/* Left sidebar */}
+    <div style={{width:190,background:"#08081a",borderRight:"1px solid #111130",display:"flex",flexDirection:"column",flexShrink:0}}>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",borderBottom:"1px solid #111130"}}>
+        {["stocks","crypto","forex","commodities"].map(c=>(
+          <button key={c} onClick={()=>setCat(c)} style={{padding:"7px 0",background:cat===c?"#0d0d1f":"transparent",border:"none",borderBottom:cat===c?"2px solid #00e5a0":"2px solid transparent",color:cat===c?"#c0c0f0":"#333360",fontFamily:"'Space Mono',monospace",fontSize:8,letterSpacing:0.5,cursor:"pointer"}}>
+            {c==="commodities"?"COMMOD.":c.toUpperCase()}
+          </button>
+        ))}
+      </div>
+      <div style={{flex:1,overflowY:"auto"}}>
+        {(ASSETS[cat]||[]).map(a=>{
+          const sel=asset.symbol===a.symbol;
+          return(
+            <div key={a.symbol} onClick={()=>setAsset({...a,category:cat})}
+              style={{padding:"8px 12px",cursor:"pointer",borderBottom:"1px solid #0d0d1a",background:sel?"#111128":"transparent",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <div>
+                <div style={{fontSize:11,fontWeight:700,color:"#d0d0f0",fontFamily:"'Space Mono',monospace"}}>{a.symbol}</div>
+                <div style={{fontSize:8,color:"#2a2a50",marginTop:1}}>{a.name}</div>
+              </div>
+              <div style={{textAlign:"right"}}>
+                <div style={{fontSize:10,color:"#9090c0",fontFamily:"'Space Mono',monospace"}}>{fmt(a.price)}</div>
+                <div style={{fontSize:9,color:a.changePct>=0?"#00e5a0":"#ff4d6d",fontFamily:"'Space Mono',monospace"}}>{fmtPct(a.changePct)}</div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+
+    {/* Center */}
+    <div style={{flex:1,display:"flex",flexDirection:"column",minWidth:0}}>
+      {panel==="chart"&&(
+        <>
+          <div style={{padding:"8px 14px",borderBottom:"1px solid #111130",display:"flex",alignItems:"center",gap:12,flexShrink:0,background:"#07071a",flexWrap:"wrap"}}>
+            <div style={{display:"flex",alignItems:"baseline",gap:8}}>
+              <span style={{fontFamily:"'Space Mono',monospace",fontWeight:700,fontSize:16,color:"#e0e0ff"}}>{asset.symbol}</span>
+              <span style={{fontFamily:"'Space Mono',monospace",fontSize:9,color:"#2a2a50"}}>{asset.name}</span>
+            </div>
+            <div style={{display:"flex",alignItems:"baseline",gap:8}}>
+              <span style={{fontFamily:"'Space Mono',monospace",fontWeight:700,fontSize:20,color:isUp?"#00e5a0":"#ff4d6d"}}>{fmt(livePrice)}</span>
+              <span style={{fontFamily:"'Space Mono',monospace",fontSize:11,color:isUp?"#00a070":"#cc3355"}}>{fmtPct(asset.changePct)}</span>
+            </div>
+            <div style={{display:"flex",gap:2,marginLeft:"auto"}}>
+              {TIMEFRAMES.map(t=>(
+                <button key={t} onClick={()=>setTf(t)} style={{padding:"3px 7px",background:tf===t?"#1a1a35":"transparent",border:`1px solid ${tf===t?"#2a2a55":"transparent"}`,borderRadius:4,color:tf===t?"#c0c0f0":"#333360",fontFamily:"'Space Mono',monospace",fontSize:9,cursor:"pointer"}}>
+                  {t}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div style={{flex:1,minHeight:0,background:"#06060f"}}>
+            <CandleChart candles={candles} livePrice={livePrice} symbol={asset.symbol}/>
+          </div>
+          <div style={{height:60,borderTop:"1px solid #0d0d1a",flexShrink:0}}>
+            <div style={{fontSize:8,color:"#222245",fontFamily:"'Space Mono',monospace",padding:"4px 10px",letterSpacing:1}}>VOLUME</div>
+            <div style={{height:40}}><VolumeBar candles={candles}/></div>
+          </div>
+        </>
+      )}
+      {panel==="portfolio"&&<div style={{flex:1,minHeight:0}}><Portfolio/></div>}
+      {panel==="news"&&<div style={{flex:1,minHeight:0}}><NewsFeed/></div>}
+    </div>
+
+    {/* Right sidebar */}
+    <div style={{width:230,background:"#08081a",borderLeft:"1px solid #111130",display:"flex",flexDirection:"column",flexShrink:0}}>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",borderBottom:"1px solid #111130"}}>
+        {[["book","ORDER BOOK"],["trade","TRADE"]].map(([k,l])=>(
+          <button key={k} onClick={()=>setRightTab(k)} style={{padding:"8px 0",background:rightTab===k?"#0d0d1f":"transparent",border:"none",borderBottom:rightTab===k?"2px solid #00e5a0":"2px solid transparent",color:rightTab===k?"#c0c0f0":"#333360",fontFamily:"'Space Mono',monospace",fontSize:9,cursor:"pointer",letterSpacing:0.8}}>
+            {l}
+          </button>
+        ))}
+      </div>
+      <div style={{flex:1,minHeight:0,overflowY:"auto"}}>
+        {rightTab==="book"?<OrderBook asset={{...asset,price:livePrice}}/>:<TradePanel asset={{...asset,price:livePrice}}/>}
+      </div>
+    </div>
+  </div>
+</div>
+```
+
+);
+}
+
+ReactDOM.createRoot(document.getElementById(“root”)).render(<App/>);
+</script>
+
+</body>
+</html>
